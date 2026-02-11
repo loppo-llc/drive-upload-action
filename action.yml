@@ -1,0 +1,75 @@
+name: Drive Upload Action
+description: Upload a file or zipped directory to Google Drive using a service account.
+author: Seibe
+
+inputs:
+  source:
+    description: Path to a file or directory to upload.
+    required: true
+  name:
+    description: Optional destination file name on Drive.
+    required: false
+  mime-type:
+    description: Optional mime type override.
+    required: false
+  parent-folder-id:
+    description: Parent Google Drive folder ID. Defaults to root.
+    required: false
+    default: root
+  folder-path:
+    description: "Optional nested folder path created under parent-folder-id (example: release/nightly)."
+    required: false
+  drive-id:
+    description: Optional shared drive ID to scope folder/file lookups.
+    required: false
+  archive-folder:
+    description: When source is a directory, upload as zip if true.
+    required: false
+    default: 'true'
+  conflict-behavior:
+    description: "What to do if same filename exists in destination: overwrite, skip, error."
+    required: false
+    default: overwrite
+  service-account-json:
+    description: Service account JSON credentials.
+    required: false
+  service-account-json-base64:
+    description: Base64 encoded service account JSON credentials.
+    required: false
+  subject:
+    description: Optional user email for domain-wide delegation impersonation.
+    required: false
+  max-retries:
+    description: Maximum retry count for transient Drive/API failures.
+    required: false
+    default: '5'
+  initial-retry-delay-ms:
+    description: Initial delay in ms used for exponential backoff.
+    required: false
+    default: '1000'
+  request-timeout-ms:
+    description: HTTP request timeout in milliseconds.
+    required: false
+    default: '120000'
+
+outputs:
+  file-id:
+    description: Uploaded (or reused) Drive file ID.
+  file-name:
+    description: Uploaded (or reused) Drive file name.
+  mime-type:
+    description: Mime type of the file in Drive.
+  size-bytes:
+    description: File size in bytes.
+  web-view-link:
+    description: Drive webViewLink when available.
+  web-content-link:
+    description: Drive webContentLink when available.
+
+runs:
+  using: node24
+  main: dist/index.js
+
+branding:
+  icon: upload-cloud
+  color: blue
