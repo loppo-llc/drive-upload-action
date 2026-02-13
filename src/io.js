@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 
 function toInputEnvKey(name) {
-  return `INPUT_${name.replace(/ /g, '_').replace(/-/g, '_').toUpperCase()}`;
+  return `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
 }
 
 function getInput(name, { required = false } = {}) {

@@ -5,7 +5,7 @@ const { normalizeFolderPath, getBooleanInput, getNumberInput } = require('../src
 const { parseServiceAccountJson } = require('../src/auth');
 
 function toInputEnvKey(name) {
-  return `INPUT_${name.replace(/ /g, '_').replace(/-/g, '_').toUpperCase()}`;
+  return `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
 }
 
 function withMockedInputEnv(values, fn) {
@@ -140,4 +140,57 @@ test('parseServiceAccountJson successfully decodes base64', () => {
 
   const creds = parseServiceAccountJson({ serviceAccountJsonBase64: base64 });
   assert.equal(creds.client_email, 'test@example.com');
+});
+
+// Test actual GitHub Actions environment variable behavior
+test('getInput handles kebab-case input names correctly', () => {
+  const { getInput } = require('../src/io');
+
+  // GitHub Actions sets INPUT_SERVICE-ACCOUNT-JSON (with hyphens)
+  const originalEnv = process.env['INPUT_SERVICE-ACCOUNT-JSON'];
+  process.env['INPUT_SERVICE-ACCOUNT-JSON'] = 'test-value';
+
+  try {
+    const value = getInput('service-account-json');
+    assert.equal(value, 'test-value');
+  } finally {
+    if (originalEnv === undefined) {
+      delete process.env['INPUT_SERVICE-ACCOUNT-JSON'];
+    } else {
+      process.env['INPUT_SERVICE-ACCOUNT-JSON'] = originalEnv;
+    }
+  }
+});
+
+test('service-account-json input is properly handled by getInputs', () => {
+  const { getInputs } = require('../src/input');
+
+  const originalEnv = process.env['INPUT_SERVICE-ACCOUNT-JSON'];
+  const originalEnvBase64 = process.env['INPUT_SERVICE-ACCOUNT-JSON-BASE64'];
+  const originalSource = process.env['INPUT_SOURCE'];
+
+  process.env['INPUT_SERVICE-ACCOUNT-JSON'] = '{"client_email":"test@example.com","private_key":"key"}';
+  process.env['INPUT_SOURCE'] = __filename; // Use this test file as source
+
+  try {
+    const inputs = getInputs();
+    assert.equal(inputs.serviceAccountJson, '{"client_email":"test@example.com","private_key":"key"}');
+    assert.equal(inputs.serviceAccountJsonBase64, undefined);
+  } finally {
+    if (originalEnv === undefined) {
+      delete process.env['INPUT_SERVICE-ACCOUNT-JSON'];
+    } else {
+      process.env['INPUT_SERVICE-ACCOUNT-JSON'] = originalEnv;
+    }
+    if (originalEnvBase64 === undefined) {
+      delete process.env['INPUT_SERVICE-ACCOUNT-JSON-BASE64'];
+    } else {
+      process.env['INPUT_SERVICE-ACCOUNT-JSON-BASE64'] = originalEnvBase64;
+    }
+    if (originalSource === undefined) {
+      delete process.env['INPUT_SOURCE'];
+    } else {
+      process.env['INPUT_SOURCE'] = originalSource;
+    }
+  }
 });
