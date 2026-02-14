@@ -1,8 +1,11 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { normalizeFolderPath, getBooleanInput, getNumberInput } = require('../src/input');
-const { parseServiceAccountJson } = require('../src/auth');
+const { resolveCredentialsFile, createAuth } = require('../src/auth');
 
 function toInputEnvKey(name) {
   return `INPUT_${name.replace(/ /g, '_').toUpperCase()}`;
@@ -28,6 +31,24 @@ function withMockedInputEnv(values, fn) {
       } else {
         process.env[envKey] = originalEnv[envKey];
       }
+    }
+  }
+}
+
+function withEnv(key, value, fn) {
+  const original = process.env[key];
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+  try {
+    fn();
+  } finally {
+    if (original === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = original;
     }
   }
 }
@@ -94,103 +115,156 @@ test('getBooleanInput handles edge cases', () => {
   });
 });
 
-test('parseServiceAccountJson validates fields', () => {
-  const creds = parseServiceAccountJson({
-    serviceAccountJson: JSON.stringify({
-      client_email: 'a@example.com',
-      private_key: 'line1\\nline2'
-    })
-  });
+// --- resolveCredentialsFile tests ---
 
-  assert.equal(creds.client_email, 'a@example.com');
-  assert.equal(creds.private_key.includes('\n'), true);
-});
-
-test('parseServiceAccountJson throws error when no credentials provided', () => {
-  assert.throws(
-    () => parseServiceAccountJson({}),
-    /either 'service-account-json' or 'service-account-json-base64' input is required/
-  );
-});
-
-test('parseServiceAccountJson throws error on invalid JSON', () => {
-  assert.throws(
-    () => parseServiceAccountJson({ serviceAccountJson: 'invalid-json' }),
-    /failed to parse service account JSON/
-  );
-});
-
-test('parseServiceAccountJson throws error on missing required fields', () => {
-  assert.throws(
-    () => parseServiceAccountJson({ serviceAccountJson: JSON.stringify({ type: 'service_account' }) }),
-    /service account JSON must include 'client_email' and 'private_key'/
-  );
-});
-
-test('parseServiceAccountJson handles base64 decoding failure', () => {
-  assert.throws(
-    () => parseServiceAccountJson({ serviceAccountJsonBase64: 'invalid-base64!!!' }),
-    /failed to (decode base64 credentials|parse service account JSON)/
-  );
-});
-
-test('parseServiceAccountJson successfully decodes base64', () => {
-  const json = JSON.stringify({ client_email: 'test@example.com', private_key: 'key' });
-  const base64 = Buffer.from(json).toString('base64');
-
-  const creds = parseServiceAccountJson({ serviceAccountJsonBase64: base64 });
-  assert.equal(creds.client_email, 'test@example.com');
-});
-
-// Test actual GitHub Actions environment variable behavior
-test('getInput handles kebab-case input names correctly', () => {
-  const { getInput } = require('../src/io');
-
-  // GitHub Actions sets INPUT_SERVICE-ACCOUNT-JSON (with hyphens)
-  const originalEnv = process.env['INPUT_SERVICE-ACCOUNT-JSON'];
-  process.env['INPUT_SERVICE-ACCOUNT-JSON'] = 'test-value';
-
+test('resolveCredentialsFile returns credentialsFile when provided and file exists', () => {
+  const tmpFile = path.join(os.tmpdir(), `creds-test-${Date.now()}.json`);
+  fs.writeFileSync(tmpFile, '{}');
   try {
-    const value = getInput('service-account-json');
-    assert.equal(value, 'test-value');
+    withEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined, () => {
+      const result = resolveCredentialsFile(tmpFile);
+      assert.equal(result, tmpFile);
+    });
   } finally {
-    if (originalEnv === undefined) {
-      delete process.env['INPUT_SERVICE-ACCOUNT-JSON'];
-    } else {
-      process.env['INPUT_SERVICE-ACCOUNT-JSON'] = originalEnv;
-    }
+    fs.unlinkSync(tmpFile);
   }
 });
 
-test('service-account-json input is properly handled by getInputs', () => {
+test('resolveCredentialsFile prefers credentialsFile over env var', () => {
+  const tmpFile1 = path.join(os.tmpdir(), `creds-test1-${Date.now()}.json`);
+  const tmpFile2 = path.join(os.tmpdir(), `creds-test2-${Date.now()}.json`);
+  fs.writeFileSync(tmpFile1, '{}');
+  fs.writeFileSync(tmpFile2, '{}');
+  try {
+    withEnv('GOOGLE_APPLICATION_CREDENTIALS', tmpFile2, () => {
+      const result = resolveCredentialsFile(tmpFile1);
+      assert.equal(result, tmpFile1);
+    });
+  } finally {
+    fs.unlinkSync(tmpFile1);
+    fs.unlinkSync(tmpFile2);
+  }
+});
+
+test('resolveCredentialsFile falls back to GOOGLE_APPLICATION_CREDENTIALS', () => {
+  const tmpFile = path.join(os.tmpdir(), `creds-env-${Date.now()}.json`);
+  fs.writeFileSync(tmpFile, '{}');
+  try {
+    withEnv('GOOGLE_APPLICATION_CREDENTIALS', tmpFile, () => {
+      const result = resolveCredentialsFile(undefined);
+      assert.equal(result, tmpFile);
+    });
+  } finally {
+    fs.unlinkSync(tmpFile);
+  }
+});
+
+test('resolveCredentialsFile throws when credentialsFile does not exist', () => {
+  withEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined, () => {
+    assert.throws(
+      () => resolveCredentialsFile('/nonexistent/path/creds.json'),
+      /credentials-file does not exist/i
+    );
+  });
+});
+
+test('resolveCredentialsFile throws when GOOGLE_APPLICATION_CREDENTIALS file does not exist', () => {
+  withEnv('GOOGLE_APPLICATION_CREDENTIALS', '/nonexistent/path/creds.json', () => {
+    assert.throws(
+      () => resolveCredentialsFile(undefined),
+      /GOOGLE_APPLICATION_CREDENTIALS does not exist/i
+    );
+  });
+});
+
+test('resolveCredentialsFile throws when path is a directory', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'creds-dir-'));
+  try {
+    withEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined, () => {
+      assert.throws(
+        () => resolveCredentialsFile(tmpDir),
+        /credentials-file is not a file/i
+      );
+    });
+  } finally {
+    fs.rmdirSync(tmpDir);
+  }
+});
+
+test('resolveCredentialsFile throws when no credentials at all', () => {
+  withEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined, () => {
+    assert.throws(
+      () => resolveCredentialsFile(undefined),
+      /No credentials found/
+    );
+  });
+});
+
+test('resolveCredentialsFile error message includes guidance', () => {
+  withEnv('GOOGLE_APPLICATION_CREDENTIALS', undefined, () => {
+    assert.throws(
+      () => resolveCredentialsFile(undefined),
+      /google-github-actions\/auth/
+    );
+  });
+});
+
+// --- createAuth tests ---
+
+test('createAuth returns a GoogleAuth instance', () => {
+  const tmpFile = path.join(os.tmpdir(), `creds-auth-${Date.now()}.json`);
+  fs.writeFileSync(tmpFile, JSON.stringify({ type: 'service_account', client_email: 'a@b.com', private_key: 'k' }));
+  try {
+    const auth = createAuth(tmpFile);
+    assert.ok(auth);
+    assert.equal(typeof auth.getClient, 'function');
+  } finally {
+    fs.unlinkSync(tmpFile);
+  }
+});
+
+// --- getInputs credential-file integration ---
+
+test('getInputs includes credentialsFile', () => {
   const { getInputs } = require('../src/input');
 
-  const originalEnv = process.env['INPUT_SERVICE-ACCOUNT-JSON'];
-  const originalEnvBase64 = process.env['INPUT_SERVICE-ACCOUNT-JSON-BASE64'];
+  const originalCf = process.env['INPUT_CREDENTIALS-FILE'];
   const originalSource = process.env['INPUT_SOURCE'];
 
-  process.env['INPUT_SERVICE-ACCOUNT-JSON'] = '{"client_email":"test@example.com","private_key":"key"}';
-  process.env['INPUT_SOURCE'] = __filename; // Use this test file as source
+  process.env['INPUT_CREDENTIALS-FILE'] = '/tmp/creds.json';
+  process.env['INPUT_SOURCE'] = __filename;
 
   try {
     const inputs = getInputs();
-    assert.equal(inputs.serviceAccountJson, '{"client_email":"test@example.com","private_key":"key"}');
-    assert.equal(inputs.serviceAccountJsonBase64, undefined);
+    assert.equal(inputs.credentialsFile, '/tmp/creds.json');
   } finally {
-    if (originalEnv === undefined) {
-      delete process.env['INPUT_SERVICE-ACCOUNT-JSON'];
+    if (originalCf === undefined) {
+      delete process.env['INPUT_CREDENTIALS-FILE'];
     } else {
-      process.env['INPUT_SERVICE-ACCOUNT-JSON'] = originalEnv;
-    }
-    if (originalEnvBase64 === undefined) {
-      delete process.env['INPUT_SERVICE-ACCOUNT-JSON-BASE64'];
-    } else {
-      process.env['INPUT_SERVICE-ACCOUNT-JSON-BASE64'] = originalEnvBase64;
+      process.env['INPUT_CREDENTIALS-FILE'] = originalCf;
     }
     if (originalSource === undefined) {
       delete process.env['INPUT_SOURCE'];
     } else {
       process.env['INPUT_SOURCE'] = originalSource;
+    }
+  }
+});
+
+test('getInput handles kebab-case input names correctly', () => {
+  const { getInput } = require('../src/io');
+
+  const originalEnv = process.env['INPUT_CREDENTIALS-FILE'];
+  process.env['INPUT_CREDENTIALS-FILE'] = 'test-value';
+
+  try {
+    const value = getInput('credentials-file');
+    assert.equal(value, 'test-value');
+  } finally {
+    if (originalEnv === undefined) {
+      delete process.env['INPUT_CREDENTIALS-FILE'];
+    } else {
+      process.env['INPUT_CREDENTIALS-FILE'] = originalEnv;
     }
   }
 });

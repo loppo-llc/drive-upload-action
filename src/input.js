@@ -72,9 +72,7 @@ function getInputs() {
     driveId: getInput('drive-id') || undefined,
     archiveFolder: getBooleanInput('archive-folder', true),
     conflictBehavior: getConflictBehavior(),
-    serviceAccountJson: getInput('service-account-json') || undefined,
-    serviceAccountJsonBase64: getInput('service-account-json-base64') || undefined,
-    subject: getInput('subject') || undefined,
+    credentialsFile: getInput('credentials-file') || undefined,
     maxRetries: getNumberInput('max-retries', 5, { min: 0 }),
     initialRetryDelayMs: getNumberInput('initial-retry-delay-ms', 1000, { min: 0 }),
     requestTimeoutMs: getNumberInput('request-timeout-ms', 120000, { min: 1000 })

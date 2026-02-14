@@ -4,13 +4,92 @@
 
 [日本語版 README はこちら](README.ja.md)
 
-A simple and robust JavaScript Action for uploading artifacts to Google Drive.
+A simple and robust JavaScript Action for uploading artifacts to Google Drive via Application Default Credentials (ADC). Workload Identity Federation (WIF) is recommended for keyless, secret-free authentication.
 
 - Upload files as-is
 - Automatically zip and upload folders
 - Shared Drive support
 - Exponential backoff retry on transient failures
 - Configurable conflict behavior: `overwrite` / `skip` / `error`
+- ADC-based authentication (WIF recommended)
+
+## Authentication
+
+This Action uses [Application Default Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials).
+Use [google-github-actions/auth](https://github.com/google-github-actions/auth) to authenticate before running this Action.
+
+> **Important**: `google-github-actions/auth` must have `create_credentials_file` enabled (this is the default).
+> If you explicitly set `create_credentials_file: false`, this Action will not work.
+
+> **Security tip**: For production workflows, pin `google-github-actions/auth` to a specific commit SHA instead of a tag.
+
+### Recommended: explicit `credentials-file`
+
+```yaml
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for Workload Identity Federation
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: 'projects/123456789/locations/global/workloadIdentityPools/my-pool/providers/my-provider'
+          service_account: 'my-sa@my-project.iam.gserviceaccount.com'
+
+      - name: Upload to Google Drive
+        id: upload
+        uses: loppo-llc/drive-upload-action@v2
+        with:
+          source: out
+          parent-folder-id: ${{ secrets.GDRIVE_PARENT_FOLDER_ID }}
+          credentials-file: ${{ steps.auth.outputs.credentials_file_path }}
+
+      - name: Print uploaded file id
+        run: echo "ID=${{ steps.upload.outputs.file-id }}"
+```
+
+### Simple: auto-detect via environment variable
+
+When `credentials-file` is omitted, the Action falls back to the `GOOGLE_APPLICATION_CREDENTIALS` environment variable (automatically set by `google-github-actions/auth`).
+
+> **Note**: On self-hosted runners, the environment variable may be set by another process. Prefer explicit `credentials-file` to avoid picking up unintended credentials.
+
+```yaml
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: '...'
+          service_account: '...'
+
+      - name: Upload to Google Drive
+        uses: loppo-llc/drive-upload-action@v2
+        with:
+          source: out
+          parent-folder-id: ${{ secrets.GDRIVE_PARENT_FOLDER_ID }}
+```
+
+## Migrating from v1
+
+v2 removes service account JSON key authentication in favor of Workload Identity Federation.
+
+| v1 | v2 |
+| --- | --- |
+| `service-account-json` | Removed. Use `google-github-actions/auth` + `credentials-file` instead. |
+| `service-account-json-base64` | Removed. |
+| `subject` | Removed. Domain-wide delegation is not supported with WIF. |
+
+### Migration steps
+
+1. [Set up Workload Identity Federation](https://github.com/google-github-actions/auth#workload-identity-federation-through-a-service-account) in your Google Cloud project
+2. Replace `service-account-json` with a `google-github-actions/auth` step
+3. Add `permissions: id-token: write` to your job
+4. Pass `credentials-file: ${{ steps.auth.outputs.credentials_file_path }}` to this Action (recommended)
 
 ## Inputs
 
@@ -24,9 +103,7 @@ A simple and robust JavaScript Action for uploading artifacts to Google Drive.
 | `drive-id` | no | - | Shared Drive ID (used as the search scope) |
 | `archive-folder` | no | `true` | Whether to zip when `source` is a folder |
 | `conflict-behavior` | no | `overwrite` | Behavior when a file with the same name exists: `overwrite` / `skip` / `error` |
-| `service-account-json` | no | - | Google service account JSON |
-| `service-account-json-base64` | no | - | Base64-encoded service account JSON |
-| `subject` | no | - | Email address for Domain-wide Delegation impersonation |
+| `credentials-file` | no | - | Path to Google Cloud credentials JSON file. Typically `${{ steps.auth.outputs.credentials_file_path }}`. Falls back to `GOOGLE_APPLICATION_CREDENTIALS` env var. |
 | `max-retries` | no | `5` | Maximum number of retries on transient failures |
 | `initial-retry-delay-ms` | no | `1000` | Initial retry delay in milliseconds |
 | `request-timeout-ms` | no | `120000` | Drive API request timeout in milliseconds |
@@ -39,39 +116,6 @@ A simple and robust JavaScript Action for uploading artifacts to Google Drive.
 - `size-bytes`
 - `web-view-link`
 - `web-content-link`
-
-## Usage
-
-```yaml
-name: Upload Artifact to Drive
-
-on:
-  workflow_dispatch:
-
-jobs:
-  upload:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Build artifact
-        run: |
-          mkdir -p out
-          echo hello > out/hello.txt
-
-      - name: Upload to Google Drive
-        id: upload
-        uses: loppo-llc/drive-upload-action@v1
-        with:
-          source: out
-          parent-folder-id: ${{ secrets.GDRIVE_PARENT_FOLDER_ID }}
-          folder-path: releases/nightly
-          conflict-behavior: overwrite
-          service-account-json: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
-
-      - name: Print uploaded file id
-        run: echo "ID=${{ steps.upload.outputs.file-id }}"
-```
 
 ## Conflict behavior and destructive operations
 
@@ -87,26 +131,18 @@ The `conflict-behavior` setting controls what happens when a file with the same 
 
 ## Required permissions
 
-This Action requires the `https://www.googleapis.com/auth/drive` scope for the service account. This grants **full access** to Google Drive.
+This Action requires the `https://www.googleapis.com/auth/drive` scope. This grants **full access** to Google Drive.
 
 It is recommended to limit the service account's permissions via folder sharing settings:
 
 - Share only the target upload folder with the service account as "Editor"
 - Share specific folders rather than the entire Shared Drive
 
-## Credential Setup
-
-1. Create a service account in Google Cloud
-2. Share the target Drive (My Drive or Shared Drive) with the service account
-3. Store the JSON key in GitHub Secrets
-4. Pass either `service-account-json` or `service-account-json-base64` to the Action
-
 ## Self-hosted runner requirements
 
 - The GitHub Actions Runner must support the Node.js 24 runtime
 - HTTPS connectivity to the Google Drive API (`www.googleapis.com`, `oauth2.googleapis.com`)
 - Write access to `RUNNER_TEMP` or the OS default temporary directory for creating temporary ZIP files
-- The service account JSON must always be passed via Secrets and never printed to logs
 
 ## Local development
 

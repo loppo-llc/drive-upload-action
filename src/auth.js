@@ -1,53 +1,51 @@
+const fs = require('node:fs');
 const { google } = require('googleapis');
 
-function parseServiceAccountJson({ serviceAccountJson, serviceAccountJsonBase64 }) {
-  const raw = serviceAccountJson || decodeBase64(serviceAccountJsonBase64);
-
-  if (!raw) {
-    throw new Error("either 'service-account-json' or 'service-account-json-base64' input is required");
+function resolveCredentialsFile(credentialsFile) {
+  if (credentialsFile) {
+    assertCredentialsFile(credentialsFile, 'credentials-file');
+    return credentialsFile;
   }
 
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`failed to parse service account JSON: ${error.message}`);
+  const envPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (envPath) {
+    assertCredentialsFile(envPath, 'GOOGLE_APPLICATION_CREDENTIALS');
+    return envPath;
   }
 
-  if (!parsed.client_email || !parsed.private_key) {
-    throw new Error("service account JSON must include 'client_email' and 'private_key'");
-  }
-
-  return {
-    ...parsed,
-    private_key: String(parsed.private_key).replace(/\\n/g, '\n')
-  };
+  throw new Error(
+    'No credentials found. Provide one of:\n' +
+      "  - 'credentials-file' input (recommended)\n" +
+      '  - GOOGLE_APPLICATION_CREDENTIALS environment variable\n' +
+      'Tip: use google-github-actions/auth before this action for Workload Identity Federation.'
+  );
 }
 
-function decodeBase64(value) {
-  if (!value) {
-    return undefined;
-  }
-
+function assertCredentialsFile(filePath, label) {
+  let stat;
   try {
-    return Buffer.from(value, 'base64').toString('utf8');
-  } catch (error) {
-    throw new Error(`failed to decode base64 credentials: ${error.message}`);
+    stat = fs.statSync(filePath);
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      throw new Error(`Credentials file specified by ${label} does not exist`);
+    }
+    throw new Error(`Credentials file specified by ${label} is not accessible`);
+  }
+  if (!stat.isFile()) {
+    throw new Error(`Credentials path specified by ${label} is not a file`);
+  }
+  try {
+    fs.accessSync(filePath, fs.constants.R_OK);
+  } catch {
+    throw new Error(`Credentials file specified by ${label} is not readable`);
   }
 }
 
-function createAuthClient({ credentials, subject }) {
-  const scopes = ['https://www.googleapis.com/auth/drive'];
-  return new google.auth.JWT({
-    email: credentials.client_email,
-    key: credentials.private_key,
-    scopes,
-    subject
+function createAuth(credentialsFile) {
+  return new google.auth.GoogleAuth({
+    keyFilename: credentialsFile,
+    scopes: ['https://www.googleapis.com/auth/drive']
   });
 }
 
-module.exports = {
-  parseServiceAccountJson,
-  createAuthClient,
-  decodeBase64
-};
+module.exports = { resolveCredentialsFile, createAuth };

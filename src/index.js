@@ -1,7 +1,7 @@
 const io = require('./io');
 
 const { getInputs } = require('./input');
-const { parseServiceAccountJson, createAuthClient } = require('./auth');
+const { resolveCredentialsFile, createAuth } = require('./auth');
 const { withRetry } = require('./retry');
 const { prepareUploadSource } = require('./archive');
 const {
@@ -17,8 +17,8 @@ const {
 const defaultDeps = {
   io,
   getInputs,
-  parseServiceAccountJson,
-  createAuthClient,
+  resolveCredentialsFile,
+  createAuth,
   withRetry,
   prepareUploadSource,
   createDriveClient,
@@ -37,22 +37,9 @@ async function run(customDeps = {}) {
 
   try {
     const inputs = deps.getInputs();
-    const credentials = deps.parseServiceAccountJson({
-      serviceAccountJson: inputs.serviceAccountJson,
-      serviceAccountJsonBase64: inputs.serviceAccountJsonBase64
-    });
-
-    const auth = deps.createAuthClient({
-      credentials,
-      subject: inputs.subject
-    });
-
+    const credentialsFile = deps.resolveCredentialsFile(inputs.credentialsFile);
+    const auth = deps.createAuth(credentialsFile);
     const drive = deps.createDriveClient(auth, inputs.requestTimeoutMs);
-
-    await deps.withRetry(() => auth.authorize(), {
-      maxRetries: inputs.maxRetries,
-      initialDelayMs: inputs.initialRetryDelayMs
-    });
 
     let targetParentId = inputs.parentFolderId;
     if (inputs.folderPathSegments.length > 0) {

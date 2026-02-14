@@ -1,5 +1,5 @@
 name: Drive Upload Action
-description: Upload a file or zipped directory to Google Drive using a service account.
+description: Upload a file or zipped directory to Google Drive via Application Default Credentials (WIF recommended).
 author: Seibe
 
 inputs:
@@ -30,14 +30,11 @@ inputs:
     description: "What to do if same filename exists in destination: overwrite, skip, error."
     required: false
     default: overwrite
-  service-account-json:
-    description: Service account JSON credentials.
-    required: false
-  service-account-json-base64:
-    description: Base64 encoded service account JSON credentials.
-    required: false
-  subject:
-    description: Optional user email for domain-wide delegation impersonation.
+  credentials-file:
+    description: >-
+      Path to a Google Cloud credentials JSON file.
+      Typically provided by google-github-actions/auth.
+      Falls back to GOOGLE_APPLICATION_CREDENTIALS env var if omitted.
     required: false
   max-retries:
     description: Maximum retry count for transient Drive/API failures.

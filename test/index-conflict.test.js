@@ -38,15 +38,13 @@ function createHarness({
       driveId: undefined,
       archiveFolder: true,
       conflictBehavior,
-      serviceAccountJson: '{"client_email":"a@example.com","private_key":"k"}',
-      serviceAccountJsonBase64: undefined,
-      subject: undefined,
+      credentialsFile: '/tmp/mock-creds.json',
       maxRetries: 0,
       initialRetryDelayMs: 0,
       requestTimeoutMs: 1000
     }),
-    parseServiceAccountJson: () => ({ client_email: 'a@example.com', private_key: 'k' }),
-    createAuthClient: () => ({ authorize: async () => ({}) }),
+    resolveCredentialsFile: (f) => f || '/tmp/mock-creds.json',
+    createAuth: () => ({}),
     withRetry: async (operation) => operation(),
     prepareUploadSource: async () => ({
       uploadPath: '/tmp/dummy.txt',
