@@ -10,6 +10,7 @@ const {
   ensureFolderPath,
   deleteFile,
   getFileById,
+  validateParentFolder,
   updateFile,
   uploadFile
 } = require('./drive');
@@ -26,6 +27,7 @@ const defaultDeps = {
   ensureFolderPath,
   deleteFile,
   getFileById,
+  validateParentFolder,
   updateFile,
   uploadFile
 };
@@ -55,6 +57,9 @@ async function run(customDeps = {}) {
     });
 
     let targetParentId = inputs.parentFolderId;
+
+    await deps.validateParentFolder({ drive, parentId: targetParentId });
+    deps.io.info(`validated parent folder: ${targetParentId}`);
     if (inputs.folderPathSegments.length > 0) {
       targetParentId = await deps.ensureFolderPath({
         drive,
