@@ -69,6 +69,8 @@ async function run(customDeps = {}) {
       });
     }
 
+    deps.io.info(`source path resolved to: ${inputs.resolvedSourcePath}`);
+
     const prepared = await deps.prepareUploadSource({
       sourcePath: inputs.resolvedSourcePath,
       desiredName: inputs.name,
