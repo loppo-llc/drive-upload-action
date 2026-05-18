@@ -56,22 +56,11 @@ async function run(customDeps = {}) {
       initialDelayMs: inputs.initialRetryDelayMs
     });
 
-    let targetParentId = inputs.parentFolderId;
+    const parentFolderIds = inputs.parentFolderIds || [inputs.parentFolderId];
 
-    await deps.validateParentFolder({ drive, parentId: targetParentId });
-    deps.io.info(`validated parent folder: ${targetParentId}`);
-    if (inputs.folderPathSegments.length > 0) {
-      targetParentId = await deps.ensureFolderPath({
-        drive,
-        rootParentId: targetParentId,
-        folderPathSegments: inputs.folderPathSegments,
-        driveId: inputs.driveId,
-        withRetry: (operation) =>
-          deps.withRetry(operation, {
-            maxRetries: inputs.maxRetries,
-            initialDelayMs: inputs.initialRetryDelayMs
-          })
-      });
+    for (const parentId of parentFolderIds) {
+      await deps.validateParentFolder({ drive, parentId });
+      deps.io.info(`validated parent folder: ${parentId}`);
     }
 
     deps.io.info(`source path resolved to: ${inputs.resolvedSourcePath}`);
@@ -85,92 +74,30 @@ async function run(customDeps = {}) {
     cleanup = prepared.cleanup;
 
     const mimeType = inputs.mimeType || prepared.mimeType;
-    const existing = await deps.withRetry(
-      () =>
-        deps.listFilesByName({
-          drive,
-          parentId: targetParentId,
-          fileName: prepared.uploadName,
-          driveId: inputs.driveId,
-          folderOnly: false
-        }),
-      {
-        maxRetries: inputs.maxRetries,
-        initialDelayMs: inputs.initialRetryDelayMs
-      }
-    );
 
-    if (existing.length > 0) {
-      if (inputs.conflictBehavior === 'error') {
-        throw new Error(
-          `file '${prepared.uploadName}' already exists under parent '${targetParentId}'`
-        );
-      }
-
-      if (inputs.conflictBehavior === 'skip') {
-        const current = await deps.withRetry(
-          () => deps.getFileById({ drive, fileId: existing[0].id }),
-          {
-            maxRetries: inputs.maxRetries,
-            initialDelayMs: inputs.initialRetryDelayMs
-          }
-        );
-
-        deps.io.info(`file already exists, skipping upload: ${current.id}`);
-        setOutputs(current, mimeType, Number(current.size || prepared.sizeBytes), deps.io.setOutput);
-        return;
-      }
-
-      const targetFile = existing[0];
-
-      deps.io.info(`updating existing file ${targetFile.id} with new content`);
-      const updated = await deps.withRetry(
-        () =>
-          deps.updateFile({
-            drive,
-            fileId: targetFile.id,
-            uploadPath: prepared.uploadPath,
-            uploadName: prepared.uploadName,
-            mimeType
-          }),
-        {
-          maxRetries: inputs.maxRetries,
-          initialDelayMs: inputs.initialRetryDelayMs
-        }
-      );
-
-      if (existing.length > 1) {
-        deps.io.info(`deleting ${existing.length - 1} duplicate file(s) named '${prepared.uploadName}'`);
-        for (const file of existing.slice(1)) {
-          await deps.withRetry(() => deps.deleteFile({ drive, fileId: file.id }), {
-            maxRetries: inputs.maxRetries,
-            initialDelayMs: inputs.initialRetryDelayMs
-          });
-        }
-      }
-
-      deps.io.info(`updated file '${updated.name}' with id ${updated.id}`);
-      setOutputs(updated, mimeType, prepared.sizeBytes, deps.io.setOutput);
-      return;
+    const targets = [];
+    for (const parentId of parentFolderIds) {
+      const target = await resolveDestination({ deps, drive, rootParentId: parentId, inputs, prepared });
+      targets.push(target);
     }
 
-    const uploaded = await deps.withRetry(
-      () =>
-        deps.uploadFile({
-          drive,
-          uploadPath: prepared.uploadPath,
-          uploadName: prepared.uploadName,
-          mimeType,
-          parentId: targetParentId
-        }),
-      {
-        maxRetries: inputs.maxRetries,
-        initialDelayMs: inputs.initialRetryDelayMs
+    if (inputs.conflictBehavior === 'error') {
+      for (const target of targets) {
+        if (target.existing.length > 0) {
+          throw new Error(
+            `file '${prepared.uploadName}' already exists under parent '${target.targetParentId}'`
+          );
+        }
       }
-    );
+    }
 
-    deps.io.info(`uploaded file '${uploaded.name}' with id ${uploaded.id}`);
-    setOutputs(uploaded, mimeType, prepared.sizeBytes, deps.io.setOutput);
+    const results = [];
+    for (const target of targets) {
+      const result = await applyDestination({ deps, drive, target, inputs, prepared, mimeType });
+      results.push(result);
+    }
+
+    setOutputs(results, mimeType, prepared.sizeBytes, deps.io.setOutput);
   } catch (error) {
     runFailed = true;
     deps.io.setFailed(error instanceof Error ? error.message : String(error));
@@ -187,13 +114,140 @@ async function run(customDeps = {}) {
   }
 }
 
-function setOutputs(file, mimeType, fallbackSizeBytes, setOutput = io.setOutput) {
-  setOutput('file-id', file.id);
-  setOutput('file-name', file.name);
-  setOutput('mime-type', file.mimeType || mimeType);
-  setOutput('size-bytes', file.size || String(fallbackSizeBytes));
-  setOutput('web-view-link', file.webViewLink || '');
-  setOutput('web-content-link', file.webContentLink || '');
+async function resolveDestination({ deps, drive, rootParentId, inputs, prepared }) {
+  let targetParentId = rootParentId;
+
+  if (inputs.folderPathSegments.length > 0) {
+    targetParentId = await deps.ensureFolderPath({
+      drive,
+      rootParentId,
+      folderPathSegments: inputs.folderPathSegments,
+      driveId: inputs.driveId,
+      withRetry: (operation) =>
+        deps.withRetry(operation, {
+          maxRetries: inputs.maxRetries,
+          initialDelayMs: inputs.initialRetryDelayMs
+        })
+    });
+  }
+
+  const existing = await deps.withRetry(
+    () =>
+      deps.listFilesByName({
+        drive,
+        parentId: targetParentId,
+        fileName: prepared.uploadName,
+        driveId: inputs.driveId,
+        folderOnly: false
+      }),
+    {
+      maxRetries: inputs.maxRetries,
+      initialDelayMs: inputs.initialRetryDelayMs
+    }
+  );
+
+  return { rootParentId, targetParentId, existing };
+}
+
+async function applyDestination({ deps, drive, target, inputs, prepared, mimeType }) {
+  const { targetParentId, existing } = target;
+
+  if (existing.length > 0) {
+    if (inputs.conflictBehavior === 'error') {
+      throw new Error(
+        `file '${prepared.uploadName}' already exists under parent '${targetParentId}'`
+      );
+    }
+
+    if (inputs.conflictBehavior === 'skip') {
+      const current = await deps.withRetry(
+        () => deps.getFileById({ drive, fileId: existing[0].id }),
+        {
+          maxRetries: inputs.maxRetries,
+          initialDelayMs: inputs.initialRetryDelayMs
+        }
+      );
+
+      deps.io.info(`file already exists under '${targetParentId}', skipping upload: ${current.id}`);
+      return {
+        file: current,
+        sizeBytes: Number(current.size || prepared.sizeBytes)
+      };
+    }
+
+    const targetFile = existing[0];
+
+    deps.io.info(`updating existing file ${targetFile.id} under '${targetParentId}' with new content`);
+    const updated = await deps.withRetry(
+      () =>
+        deps.updateFile({
+          drive,
+          fileId: targetFile.id,
+          uploadPath: prepared.uploadPath,
+          uploadName: prepared.uploadName,
+          mimeType
+        }),
+      {
+        maxRetries: inputs.maxRetries,
+        initialDelayMs: inputs.initialRetryDelayMs
+      }
+    );
+
+    if (existing.length > 1) {
+      deps.io.info(
+        `deleting ${existing.length - 1} duplicate file(s) named '${prepared.uploadName}' under '${targetParentId}'`
+      );
+      for (const file of existing.slice(1)) {
+        await deps.withRetry(() => deps.deleteFile({ drive, fileId: file.id }), {
+          maxRetries: inputs.maxRetries,
+          initialDelayMs: inputs.initialRetryDelayMs
+        });
+      }
+    }
+
+    deps.io.info(`updated file '${updated.name}' with id ${updated.id} under '${targetParentId}'`);
+    return { file: updated, sizeBytes: prepared.sizeBytes };
+  }
+
+  const uploaded = await deps.withRetry(
+    () =>
+      deps.uploadFile({
+        drive,
+        uploadPath: prepared.uploadPath,
+        uploadName: prepared.uploadName,
+        mimeType,
+        parentId: targetParentId
+      }),
+    {
+      maxRetries: inputs.maxRetries,
+      initialDelayMs: inputs.initialRetryDelayMs
+    }
+  );
+
+  deps.io.info(`uploaded file '${uploaded.name}' with id ${uploaded.id} under '${targetParentId}'`);
+  return { file: uploaded, sizeBytes: prepared.sizeBytes };
+}
+
+function setOutputs(results, mimeType, fallbackSizeBytes, setOutput = io.setOutput) {
+  const list = Array.isArray(results) ? results : [{ file: results, sizeBytes: fallbackSizeBytes }];
+  const first = list[0];
+  const firstFile = first.file;
+  const firstSize = first.sizeBytes;
+
+  setOutput('file-id', firstFile.id);
+  setOutput('file-name', firstFile.name);
+  setOutput('mime-type', firstFile.mimeType || mimeType);
+  setOutput('size-bytes', firstFile.size || String(firstSize));
+  setOutput('web-view-link', firstFile.webViewLink || '');
+  setOutput('web-content-link', firstFile.webContentLink || '');
+
+  const join = (values) => values.join('\n');
+  setOutput('file-ids', join(list.map((r) => r.file.id)));
+  setOutput('file-names', join(list.map((r) => r.file.name)));
+  setOutput('mime-types', join(list.map((r) => r.file.mimeType || mimeType)));
+  setOutput('size-bytes-list', join(list.map((r) => r.file.size || String(r.sizeBytes))));
+  setOutput('web-view-links', join(list.map((r) => r.file.webViewLink || '')));
+  setOutput('web-content-links', join(list.map((r) => r.file.webContentLink || '')));
 }
 
 if (require.main === module) {

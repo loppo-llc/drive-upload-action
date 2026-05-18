@@ -47,6 +47,33 @@ function normalizeFolderPath(folderPath) {
     .filter(Boolean);
 }
 
+function normalizeParentFolderIds(raw) {
+  if (!raw) {
+    return ['root'];
+  }
+
+  const ids = raw
+    .split(/[,\r\n]+/)
+    .map((segment) => segment.trim())
+    .filter(Boolean);
+
+  if (ids.length === 0) {
+    return ['root'];
+  }
+
+  const seen = new Set();
+  const deduped = [];
+  for (const id of ids) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    deduped.push(id);
+  }
+
+  return deduped;
+}
+
 function getConflictBehavior() {
   const raw = (getInput('conflict-behavior') || 'overwrite').toLowerCase();
   const allowed = ['overwrite', 'skip', 'error'];
@@ -60,13 +87,16 @@ function getInputs() {
   const sourceInput = getInput('source', { required: true });
   const resolvedSourcePath = path.resolve(process.cwd(), sourceInput);
   const folderPathInput = getInput('folder-path');
+  const parentFolderIdInput = getInput('parent-folder-id');
+  const parentFolderIds = normalizeParentFolderIds(parentFolderIdInput);
 
   return {
     sourceInput,
     resolvedSourcePath,
     name: getInput('name') || undefined,
     mimeType: getInput('mime-type') || undefined,
-    parentFolderId: getInput('parent-folder-id') || 'root',
+    parentFolderId: parentFolderIds[0],
+    parentFolderIds,
     folderPathInput,
     folderPathSegments: normalizeFolderPath(folderPathInput),
     driveId: getInput('drive-id') || undefined,
@@ -85,5 +115,6 @@ module.exports = {
   getInputs,
   getBooleanInput,
   getNumberInput,
-  normalizeFolderPath
+  normalizeFolderPath,
+  normalizeParentFolderIds
 };

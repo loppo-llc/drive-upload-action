@@ -1,6 +1,6 @@
 {
   "name": "drive-upload-action",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "private": true,
   "description": "Simple and robust GitHub Action to upload artifacts to Google Drive.",
   "license": "MIT",

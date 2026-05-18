@@ -1,7 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { normalizeFolderPath, getBooleanInput, getNumberInput } = require('../src/input');
+const {
+  normalizeFolderPath,
+  normalizeParentFolderIds,
+  getBooleanInput,
+  getNumberInput
+} = require('../src/input');
 const { parseServiceAccountJson } = require('../src/auth');
 
 function toInputEnvKey(name) {
@@ -34,6 +39,38 @@ function withMockedInputEnv(values, fn) {
 
 test('normalizeFolderPath handles slash and backslash', () => {
   assert.deepEqual(normalizeFolderPath('a/b\\c'), ['a', 'b', 'c']);
+});
+
+test('normalizeParentFolderIds defaults to root when empty', () => {
+  assert.deepEqual(normalizeParentFolderIds(''), ['root']);
+  assert.deepEqual(normalizeParentFolderIds(undefined), ['root']);
+  assert.deepEqual(normalizeParentFolderIds('   '), ['root']);
+});
+
+test('normalizeParentFolderIds returns single id', () => {
+  assert.deepEqual(normalizeParentFolderIds('folder-1'), ['folder-1']);
+  assert.deepEqual(normalizeParentFolderIds('  folder-1  '), ['folder-1']);
+});
+
+test('normalizeParentFolderIds splits on comma', () => {
+  assert.deepEqual(
+    normalizeParentFolderIds('folder-1, folder-2,folder-3'),
+    ['folder-1', 'folder-2', 'folder-3']
+  );
+});
+
+test('normalizeParentFolderIds splits on newline', () => {
+  assert.deepEqual(
+    normalizeParentFolderIds('folder-1\nfolder-2\r\nfolder-3'),
+    ['folder-1', 'folder-2', 'folder-3']
+  );
+});
+
+test('normalizeParentFolderIds mixes separators and dedupes', () => {
+  assert.deepEqual(
+    normalizeParentFolderIds('folder-1\nfolder-2, folder-1, folder-3'),
+    ['folder-1', 'folder-2', 'folder-3']
+  );
 });
 
 test('getBooleanInput parses yes/no values', () => {

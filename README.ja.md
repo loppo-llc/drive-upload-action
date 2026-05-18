@@ -19,7 +19,7 @@ Google Drive に成果物をアップロードするシンプルで堅牢な Jav
 | `source` | yes | - | アップロード対象のファイル or フォルダーのパス |
 | `name` | no | - | Drive 上のファイル名（未指定時は元ファイル名/フォルダー名.zip） |
 | `mime-type` | no | auto | MIME type の明示指定 |
-| `parent-folder-id` | no | `root` | アップロード先親フォルダー ID |
+| `parent-folder-id` | no | `root` | アップロード先親フォルダー ID。カンマ or 改行区切りで複数指定すると、同じファイルを複数のフォルダーへアップロードする。 |
 | `folder-path` | no | - | 親フォルダー配下に作成/解決するサブフォルダー（例: `release/nightly`） |
 | `drive-id` | no | - | 共有ドライブ ID（検索スコープに使用） |
 | `archive-folder` | no | `true` | `source` がフォルダーのとき ZIP 化するか |
@@ -39,6 +39,15 @@ Google Drive に成果物をアップロードするシンプルで堅牢な Jav
 - `size-bytes`
 - `web-view-link`
 - `web-content-link`
+
+`parent-folder-id` を複数指定したときは、上のスカラー出力は 1 番目の destination の値になり、以下の改行区切り出力に入力順で全 destination の値が並ぶ:
+
+- `file-ids`
+- `file-names`
+- `mime-types`
+- `size-bytes-list`
+- `web-view-links`
+- `web-content-links`
 
 ## Usage
 
@@ -72,6 +81,30 @@ jobs:
       - name: Print uploaded file id
         run: echo "ID=${{ steps.upload.outputs.file-id }}"
 ```
+
+### 複数フォルダーへの同時アップロード
+
+```yaml
+      - name: Upload to multiple Drive folders
+        id: upload
+        uses: loppo-llc/drive-upload-action@v1
+        with:
+          source: out
+          parent-folder-id: |
+            ${{ secrets.GDRIVE_FOLDER_A }}
+            ${{ secrets.GDRIVE_FOLDER_B }}
+          service-account-json: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+
+      - name: Print all uploaded file ids
+        run: echo "${{ steps.upload.outputs.file-ids }}"
+```
+
+複数 destination の挙動メモ:
+
+- 重複した ID は dedupe される（最初の出現が残る）。複数版 outputs は dedupe 後のユニーク destination 1 件ごとに 1 行、入力順で並ぶ。
+- 同じローカルファイルを各 destination に逐次アップロードする。サーバーサイドの `files.copy` 最適化は入っていないので、転送バイト数は destination 数に比例して増える。
+- `conflict-behavior=overwrite` / `skip` の場合は順次処理する。途中の destination で失敗しても、それ以前に成功した destination の書き込みは**ロールバックされない**。
+- `conflict-behavior=error` の場合は、upload/update を始める前に全 destination の衝突を事前チェックする。いずれかの destination に同名ファイルがあれば、ファイルの upload/update はせずに run が失敗する。ただし `folder-path` を指定している場合、プリフライトでの解決時に各 parent の配下に中間フォルダーが作成されることはある。
 
 ## Conflict behavior and destructive operations
 

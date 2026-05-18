@@ -19,7 +19,7 @@ A simple and robust JavaScript Action for uploading artifacts to Google Drive.
 | `source` | yes | - | Path to the file or folder to upload |
 | `name` | no | - | File name on Drive (defaults to the original file/folder name + .zip) |
 | `mime-type` | no | auto | Explicitly specify the MIME type |
-| `parent-folder-id` | no | `root` | Parent folder ID for the upload destination |
+| `parent-folder-id` | no | `root` | Parent folder ID for the upload destination. Multiple IDs can be specified separated by commas or newlines to upload the same file to multiple folders. |
 | `folder-path` | no | - | Sub-folder path to create/resolve under the parent folder (e.g. `release/nightly`) |
 | `drive-id` | no | - | Shared Drive ID (used as the search scope) |
 | `archive-folder` | no | `true` | Whether to zip when `source` is a folder |
@@ -39,6 +39,15 @@ A simple and robust JavaScript Action for uploading artifacts to Google Drive.
 - `size-bytes`
 - `web-view-link`
 - `web-content-link`
+
+When multiple `parent-folder-id` values are given, the scalar outputs above reflect the first destination, and the following newline-separated outputs are populated in input order:
+
+- `file-ids`
+- `file-names`
+- `mime-types`
+- `size-bytes-list`
+- `web-view-links`
+- `web-content-links`
 
 ## Usage
 
@@ -72,6 +81,30 @@ jobs:
       - name: Print uploaded file id
         run: echo "ID=${{ steps.upload.outputs.file-id }}"
 ```
+
+### Upload to multiple folders
+
+```yaml
+      - name: Upload to multiple Drive folders
+        id: upload
+        uses: loppo-llc/drive-upload-action@v1
+        with:
+          source: out
+          parent-folder-id: |
+            ${{ secrets.GDRIVE_FOLDER_A }}
+            ${{ secrets.GDRIVE_FOLDER_B }}
+          service-account-json: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+
+      - name: Print all uploaded file ids
+        run: echo "${{ steps.upload.outputs.file-ids }}"
+```
+
+Notes on multi-destination behavior:
+
+- Duplicate IDs are deduplicated (first occurrence wins). The plural outputs have one line per unique destination, in input order.
+- The same local file is uploaded to each destination sequentially. There is no server-side `files.copy` optimization, so byte transfer is proportional to the number of destinations.
+- With `conflict-behavior=overwrite` or `skip`, destinations are processed in order. If one destination fails after earlier writes have succeeded, the earlier writes are **not** rolled back.
+- With `conflict-behavior=error`, all destinations are checked for conflicts up front. If any destination already has a file with the target name, the run fails before any upload/update happens. Note that when `folder-path` is set, intermediate folders may still be created under each parent as a side effect of the preflight resolution.
 
 ## Conflict behavior and destructive operations
 

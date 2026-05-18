@@ -13,7 +13,12 @@ inputs:
     description: Optional mime type override.
     required: false
   parent-folder-id:
-    description: Parent Google Drive folder ID. Defaults to root.
+    description: |
+      Parent Google Drive folder ID. Defaults to root.
+      Multiple IDs can be specified separated by commas or newlines to upload the same file to multiple folders.
+      Duplicate IDs are deduplicated (first occurrence wins).
+      With conflict-behavior=overwrite or skip, destinations are processed sequentially; if one destination fails after others have already been written, the earlier writes are not rolled back.
+      With conflict-behavior=error, all destinations are checked for conflicts before any upload/update starts, so a conflict in any destination fails the run without uploading. Note that folder-path resolution may still create intermediate folders as a side effect during the preflight.
     required: false
     default: root
   folder-path:
@@ -54,17 +59,29 @@ inputs:
 
 outputs:
   file-id:
-    description: Uploaded (or reused) Drive file ID.
+    description: Uploaded (or reused) Drive file ID. When multiple parent-folder-id values are given, this is the ID for the first destination.
   file-name:
-    description: Uploaded (or reused) Drive file name.
+    description: Uploaded (or reused) Drive file name (first destination).
   mime-type:
-    description: Mime type of the file in Drive.
+    description: Mime type of the file in Drive (first destination).
   size-bytes:
-    description: File size in bytes.
+    description: File size in bytes (first destination).
   web-view-link:
-    description: Drive webViewLink when available.
+    description: Drive webViewLink when available (first destination).
   web-content-link:
-    description: Drive webContentLink when available.
+    description: Drive webContentLink when available (first destination).
+  file-ids:
+    description: Newline-separated Drive file IDs, one per parent-folder-id, in input order.
+  file-names:
+    description: Newline-separated Drive file names, one per parent-folder-id, in input order.
+  mime-types:
+    description: Newline-separated mime types, one per parent-folder-id, in input order.
+  size-bytes-list:
+    description: Newline-separated file sizes in bytes, one per parent-folder-id, in input order.
+  web-view-links:
+    description: Newline-separated Drive webViewLinks, one per parent-folder-id, in input order.
+  web-content-links:
+    description: Newline-separated Drive webContentLinks, one per parent-folder-id, in input order.
 
 runs:
   using: node24
